@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hologram — faithful Tripo3D port</title>
+<style>
+  :root { color-scheme: dark; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; overflow:hidden; background:#060a0c; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+  .hud { position:fixed; top:16px; left:18px; z-index:10; font-family:-apple-system,system-ui,sans-serif;
+    color:#7ff5e8; letter-spacing:.16em; font-size:11px; text-transform:uppercase; opacity:.85; user-select:none;
+    text-shadow:0 0 12px rgba(45,224,208,.6); }
+  .hud small { display:block; margin-top:3px; letter-spacing:.05em; color:#4a9c95; font-size:10px; text-transform:none; }
+  .btns { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:10; display:flex; gap:10px; }
+  .btns button { font-family:-apple-system,system-ui,sans-serif; font-size:12px; letter-spacing:.05em;
+    color:#bffcf4; background:rgba(16,26,30,.6); border:1px solid rgba(90,200,190,.25); padding:8px 15px;
+    border-radius:999px; cursor:pointer; backdrop-filter:blur(10px); }
+  .btns button:hover { background:rgba(45,224,208,.15); border-color:rgba(45,224,208,.6); }
+  #loading { position:fixed; inset:0; display:grid; place-items:center; z-index:20; background:#060a0c;
+    color:#7ff5e8; font-family:-apple-system,system-ui,sans-serif; letter-spacing:.2em; font-size:12px;
+    text-transform:uppercase; transition:opacity .6s ease; }
+  #loading.hidden { opacity:0; pointer-events:none; }
+  .scan { width:200px; height:2px; margin-top:18px; background:linear-gradient(90deg,transparent,#2de0d0,transparent); animation:sweep 1.2s ease-in-out infinite; }
+  @keyframes sweep { 0%,100%{transform:scaleX(.2);opacity:.4} 50%{transform:scaleX(1);opacity:1} }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="hud">HOLOGRAM<small>faithful Tripo3D port · surface + points + glyph 2-pass + rays + bloom</small></div>
+<div class="btns"><button id="replay">Replay assembly</button></div>
+<div id="loading">Loading hologram<div class="scan"></div></div>
+
+<script>
+  function __showErr(m){ var l=document.getElementById('loading'); if(!l) return; l.classList.remove('hidden'); l.style.opacity=1;
+    l.innerHTML='<div style="max-width:80vw;text-align:center;color:#ff8a8a;font-size:13px;line-height:1.5;letter-spacing:.03em;text-transform:none">⚠ '+m+'</div>'; }
+  window.addEventListener('error', e=>__showErr(e.message||String(e.error)));
+  window.addEventListener('unhandledrejection', e=>__showErr('Promise: '+(e.reason&&(e.reason.message||e.reason))));
+</script>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createHologram } from '../src/tripo-hologram.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x060a0c);
+scene.fog = new THREE.FogExp2(0x060a0c, 0.03);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, 0.05, 200);
+camera.position.set(0, 1.3, 4.6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, preserveDrawingBuffer:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.getElementById('app').appendChild(renderer.domElement);
+window.__R = renderer; window.__SCENE = scene; window.__CAM = camera;
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.autoRotate = true; controls.autoRotateSpeed = 0.5;
+controls.target.set(0, 1.1, 0); controls.minDistance = 1.2; controls.maxDistance = 20;
+
+const grid = new THREE.GridHelper(40, 80, 0x123f3a, 0x0a2622);
+grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.7, 0.2);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+window.__COMPOSER = composer;
+
+const container = new THREE.Group();
+scene.add(container);
+
+let holo = null;
+const clock = new THREE.Clock();
+
+new GLTFLoader().load('./model.glb', (gltf) => {
+  try {
+    const root = gltf.scene;
+    const b0 = new THREE.Box3().setFromObject(root);
+    const s0 = b0.getSize(new THREE.Vector3());
+    const c0 = b0.getCenter(new THREE.Vector3());
+    const s = 2.2 / (s0.y || 1);
+    root.scale.setScalar(s);
+    root.position.set(-c0.x * s, -b0.min.y * s, -c0.z * s);
+    root.updateMatrixWorld(true);
+    container.add(root);
+
+    holo = createHologram({ scene, renderer, camera, container, modelRoot: root });
+    window.__HOLO2 = holo;
+
+    const b = new THREE.Box3().setFromObject(root, true);
+    const size = b.getSize(new THREE.Vector3());
+    const center = b.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = (maxDim / (2 * Math.tan((camera.fov * Math.PI/180)/2))) * 1.5;
+    controls.target.copy(center);
+    camera.position.set(center.x, center.y + size.y*0.02, center.z + dist);
+    camera.near = dist/100; camera.far = dist*100; camera.updateProjectionMatrix();
+
+    composer.render();
+    document.getElementById('loading').classList.add('hidden');
+    window.__DBG = { h: size.y };
+  } catch (e) { console.error(e); __showErr('onLoad: ' + (e.message||e)); }
+}, undefined, (err) => { console.error(err); __showErr('Failed to load model.glb: ' + (err&&err.message||err)); });
+
+document.getElementById('replay').addEventListener('click', () => { if (holo) holo.replay(); });
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  if (holo) holo.resize(innerWidth, innerHeight, Math.min(devicePixelRatio,2));
+});
+
+let last = 0;
+function tick() {
+  const now = performance.now();
+  if (now - last < 8) return; last = now;
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (holo) { holo.update(dt); holo.renderMask(); }
+  controls.update();
+  composer.render();
+}
+function raf() { tick(); requestAnimationFrame(raf); }
+raf();
+setInterval(tick, 100);
+</script>
+</body>
+</html>

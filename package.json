@@ -1,0 +1,32 @@
+{
+  "name": "tripo-hologram-effect",
+  "version": "1.0.0",
+  "description": "Faithful Tripo3D hologram effect for Three.js — surface + points + glyph digital-rain + laser rays + bloom.",
+  "type": "module",
+  "main": "src/tripo-hologram.js",
+  "module": "src/tripo-hologram.js",
+  "exports": {
+    ".": "./src/tripo-hologram.js"
+  },
+  "files": [
+    "src/",
+    "shaders/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "three",
+    "threejs",
+    "hologram",
+    "shader",
+    "glsl",
+    "webgl",
+    "tripo3d",
+    "digital-rain",
+    "bloom"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "three": ">=0.150.0"
+  }
+}
